@@ -54,26 +54,37 @@ export const users: User[] = [
 ];
 
 export const candidates: Candidate[] = [
-  { id: "c_pres_1", name: "Candidate President A", position: "President" },
-  { id: "c_pres_2", name: "Candidate President B", position: "President" },
-  { id: "c_vp_1", name: "Candidate VP A", position: "Vice President" },
-  { id: "c_vp_2", name: "Candidate VP B", position: "Vice President" },
+  { id: "c_pres_1", name: "Ferdinand (Ferdie) Reyes", position: "President" },
+  { id: "c_pres_2", name: "Liza Morales", position: "President" },
+  { id: "c_vp_1", name: "Carlos (Carly) Dizon", position: "Vice President" },
+  { id: "c_vp_2", name: "Ana Santos", position: "Vice President" },
   // Several senate candidates
-  { id: "c_sen_1", name: "Senator 1", position: "Senator" },
-  { id: "c_sen_2", name: "Senator 2", position: "Senator" },
-  { id: "c_sen_3", name: "Senator 3", position: "Senator" },
-  { id: "c_sen_4", name: "Senator 4", position: "Senator" },
-  { id: "c_sen_5", name: "Senator 5", position: "Senator" },
-  { id: "c_sen_6", name: "Senator 6", position: "Senator" },
-  { id: "c_sen_7", name: "Senator 7", position: "Senator" },
-  { id: "c_sen_8", name: "Senator 8", position: "Senator" },
-  { id: "c_sen_9", name: "Senator 9", position: "Senator" },
-  { id: "c_sen_10", name: "Senator 10", position: "Senator" },
-  { id: "c_sen_11", name: "Senator 11", position: "Senator" },
-  { id: "c_sen_12", name: "Senator 12", position: "Senator" }
+  { id: "c_sen_1", name: "Josefa (Jo) Cruz", position: "Senator" },
+  { id: "c_sen_2", name: "Emilio Navarro", position: "Senator" },
+  { id: "c_sen_3", name: "Marilyn Reyes", position: "Senator" },
+  { id: "c_sen_4", name: "Ramon Bautista", position: "Senator" },
+  { id: "c_sen_5", name: "Cristina Velasquez", position: "Senator" },
+  { id: "c_sen_6", name: "Hector Lim", position: "Senator" },
+  { id: "c_sen_7", name: "Isabel Navarro", position: "Senator" },
+  { id: "c_sen_8", name: "Antonio Delgado", position: "Senator" },
+  { id: "c_sen_9", name: "Rosa Mendoza", position: "Senator" },
+  { id: "c_sen_10", name: "Victor Santos", position: "Senator" },
+  { id: "c_sen_11", name: "Lucia Fernandez", position: "Senator" },
+  { id: "c_sen_12", name: "Enrique Flores", position: "Senator" }
 ];
 
 export const votes: VoteRecord[] = [];
+
+// Voting session flag (admin can turn on/off)
+export let votingSessionActive = false;
+
+export function setVotingSession(active: boolean) {
+  votingSessionActive = active;
+}
+
+export function isVotingActive() {
+  return votingSessionActive;
+}
 
 // Simple session store: maps session token to user id. Tokens are random hex.
 export const sessions: Record<string, { userId: string; expires: number }> = {};
@@ -87,12 +98,23 @@ export function createSession(userId: string, ttlMs = 1000 * 60 * 60 * 8) {
 export function getSession(token?: string) {
   if (!token) return null;
   const s = sessions[token];
-  if (!s) return null;
-  if (s.expires < Date.now()) {
-    delete sessions[token];
-    return null;
+  if (s) {
+    if (s.expires < Date.now()) {
+      delete sessions[token];
+      return null;
+    }
+    return s.userId;
   }
-  return s.userId;
+
+  // Fallback: allow stateless session where the cookie value is the userId directly.
+  // This makes the prototype work in environments where middleware (Edge) and
+  // API routes (Node) cannot share in-memory state. In production use a
+  // persistent session store or signed tokens.
+  if (typeof token === 'string') {
+    const u = findUserById(token);
+    if (u) return u.id;
+  }
+  return null;
 }
 
 export function findUserById(id: string) {

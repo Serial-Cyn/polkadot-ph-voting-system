@@ -7,9 +7,11 @@ export default function AdminPage() {
   const [position, setPosition] = useState('');
   const [candidates, setCandidates] = useState<any[]>([]);
   const [msg, setMsg] = useState<string | null>(null);
+  const [sessionActive, setSessionActive] = useState<boolean | null>(null);
 
   useEffect(()=>{
     fetch('/api/candidates').then(r=>r.json()).then(d=>{ if (d.ok && Array.isArray(d.candidates)) setCandidates(d.candidates); else if (Array.isArray(d)) setCandidates(d); }).catch(()=>{});
+    fetch('/api/session').then(r=>r.json()).then(d=>{ if (d.ok) setSessionActive(d.active); }).catch(()=>{});
   }, []);
 
   async function handleAdd(e:any){
@@ -23,6 +25,14 @@ export default function AdminPage() {
       setMsg('Candidate added');
       setName(''); setPosition('');
     }catch(err:any){ setMsg(String(err)); }
+  }
+
+  async function toggleSession(){
+    try{
+      const res = await fetch('/api/session', { method: 'POST', credentials: 'include' });
+      const d = await res.json();
+      if (d.ok) setSessionActive(d.active);
+    }catch(err){ setMsg(String(err)); }
   }
 
   return (
@@ -45,6 +55,13 @@ export default function AdminPage() {
           </div>
           <button className="bg-green-600 text-white px-3 py-1 rounded" type="submit">Add candidate</button>
         </form>
+
+        <div className="mb-4">
+          <strong>Voting session:</strong> {sessionActive ? 'Active' : 'Inactive'}
+          <div className="mt-2">
+            <button onClick={toggleSession} className="bg-orange-600 text-white px-3 py-1 rounded">Toggle session</button>
+          </div>
+        </div>
 
         {msg && <div className="mb-4">{msg}</div>}
 

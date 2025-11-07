@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { getSession, findUserById, hasVoted, recordVote } from "../../../lib/data";
+import { getSession, findUserById, hasVoted, recordVote, isVotingActive } from "../../../lib/data";
 import { submitVoteOnChain } from "../../../lib/polkadot";
 
 function parseCookies(cookieHeader?: string | null) {
@@ -23,6 +23,11 @@ export async function POST(req: Request) {
     const body = await req.json();
     const { position, candidateIds } = body;
     if (!position || !Array.isArray(candidateIds)) return NextResponse.json({ ok: false, error: "invalid payload" }, { status: 400 });
+
+    // enforce voting session active
+    if (!isVotingActive()) {
+      return NextResponse.json({ ok: false, error: "voting session is not active" }, { status: 403 });
+    }
 
     // enforce Philippine rules: President/VicePresident single choice, Senator up to 12
     if ((position === "President" || position === "Vice President") && candidateIds.length !== 1) {
