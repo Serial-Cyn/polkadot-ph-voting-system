@@ -4,13 +4,15 @@ import { validateOtp, createSession, findUserById } from "../../../lib/data";
 export async function POST(req: Request) {
   try {
     const body = await req.json();
-    const { id, otp } = body;
-    if (!id || !otp) return NextResponse.json({ ok: false, error: "missing id or otp" }, { status: 400 });
+  let { id, otp } = body;
+  id = typeof id === 'string' ? id.trim() : id;
+  otp = typeof otp === 'string' ? otp.trim() : otp;
+  if (!id || !otp) return NextResponse.json({ ok: false, error: "missing id or otp" }, { status: 400 });
 
-    const user = findUserById(id);
+  const user = findUserById(id);
     if (!user) return NextResponse.json({ ok: false, error: "user not found" }, { status: 404 });
 
-    const ok = validateOtp(id, otp);
+  const ok = validateOtp(id, otp);
     if (!ok) return NextResponse.json({ ok: false, error: "invalid otp" }, { status: 401 });
 
     const token = createSession(id);

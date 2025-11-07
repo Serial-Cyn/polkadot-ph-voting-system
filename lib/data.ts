@@ -2,7 +2,21 @@
 // NOTE: This is a proof-of-concept only. For production, use a persistent DB
 // and secure secret management.
 
-import crypto from "crypto";
+// Use Web Crypto API (available in Edge runtime / browsers) instead of Node's crypto
+
+function randomBytesHex(bytes: number) {
+  if (typeof globalThis?.crypto?.getRandomValues === "function") {
+    const arr = new Uint8Array(bytes);
+    globalThis.crypto.getRandomValues(arr);
+    return Array.from(arr).map((b) => b.toString(16).padStart(2, "0")).join("");
+  }
+  // Fallback (not cryptographically secure)
+  let s = "";
+  for (let i = 0; i < bytes; i++) {
+    s += Math.floor(Math.random() * 256).toString(16).padStart(2, "0");
+  }
+  return s;
+}
 
 type Role = "voter" | "admin";
 
@@ -30,8 +44,7 @@ export type VoteRecord = {
 // In-memory data -- initialized with a few dummy accounts and some sample
 // candidates. OTPs are randomly generated (10+ chars) per requirement.
 
-const makeOtp = (len = 12) =>
-  crypto.randomBytes(Math.ceil(len / 2)).toString("hex").slice(0, len);
+const makeOtp = (len = 12) => randomBytesHex(Math.ceil(len / 2)).slice(0, len);
 
 export const users: User[] = [
   { id: "voter01", name: "Juan Dela Cruz", role: "voter", otp: makeOtp(12) },
@@ -66,7 +79,7 @@ export const votes: VoteRecord[] = [];
 export const sessions: Record<string, { userId: string; expires: number }> = {};
 
 export function createSession(userId: string, ttlMs = 1000 * 60 * 60 * 8) {
-  const token = crypto.randomBytes(32).toString("hex");
+  const token = randomBytesHex(32);
   sessions[token] = { userId, expires: Date.now() + ttlMs };
   return token;
 }
@@ -90,7 +103,7 @@ export function validateOtp(id: string, otp: string) {
   const u = findUserById(id);
   if (!u) return false;
   // OTP is one-time: if matches, consume/replace it with a new one.
-  if (u.otp === otp) {
+  if (typeof otp === 'string' && u.otp === otp.trim()) {
     u.otp = makeOtp(12);
     return true;
   }
@@ -98,9 +111,7 @@ export function validateOtp(id: string, otp: string) {
 }
 
 export function addCandidate(c: { name: string; position: string }) {
-  const id = `${c.position.slice(0, 4).toLowerCase()}_${crypto
-    .randomBytes(4)
-    .toString("hex")}`;
+  const id = `${c.position.slice(0, 4).toLowerCase()}_${randomBytesHex(4)}`;
   const cand: Candidate = { id, name: c.name, position: c.position };
   candidates.push(cand);
   return cand;

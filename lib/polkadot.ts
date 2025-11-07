@@ -1,34 +1,66 @@
-// Polkadot integration helper (stub / prototype)
-// This module provides a small interface to "submit" votes to a Polkadot
-// chain. It currently simulates a transaction and returns a fake tx hash.
-// To fully integrate, install '@polkadot/api' and implement submitVote using
-// an account that signs extrinsics.
+// Polkadot / EVM integration helper (stub / prototype)
+// This module demonstrates two approaches:
+//  - Calling a Substrate-based chain via @polkadot/api (left as notes)
+//  - Calling a Solidity contract on an EVM-compatible parachain using ethers.js (optional)
+//
+// By default this will simulate a tx hash. If you deploy the `contracts/Voting.sol`
+// contract to an EVM-compatible parachain (e.g., Moonbeam / Moonriver) and provide
+// the environment variables CONTRACT_ADDRESS, ETH_PROVIDER, and SIGNER_PRIVATE_KEY,
+// the module will attempt to call the contract via ethers.
+
+// Try to import ethers if available (optional).
+let ethers: any = null;
+try {
+  // dynamic require to avoid bundling errors if ethers is not installed
+  // eslint-disable-next-line @typescript-eslint/no-var-requires
+  ethers = require('ethers');
+} catch (e) {
+  // ethers not installed — contract calls will be simulated.
+}
 
 export async function submitVoteOnChain(payload: {
   voterId: string;
   position: string;
   candidateIds: string[];
 }) {
-  // Simulate network delay
-  await new Promise((r) => setTimeout(r, 300));
-  // Create a fake tx hash (not a real on-chain tx)
-  const txHash = `0x${Math.floor(Math.random() * 1e16).toString(16).padStart(16, "0")}`;
-  // In a real integration you would do something like:
-  // import { ApiPromise, WsProvider, Keyring } from '@polkadot/api';
-  // const provider = new WsProvider('wss://westend-rpc.polkadot.io');
-  // const api = await ApiPromise.create({ provider });
-  // const keyring = new Keyring({ type: 'sr25519' });
-  // const alice = keyring.addFromUri('<SEED>');
-  // const tx = api.tx.myModule.recordVote(payload.voterId, payload.position, payload.candidateIds);
-  // const hash = await tx.signAndSend(alice);
-  // return hash.toHex();
+  // If an ethers provider and contract address are configured, attempt to call the contract.
+  const providerUrl = typeof process !== 'undefined' ? process.env.CONTRACT_PROVIDER_URL || process.env.ETH_PROVIDER : undefined;
+  const contractAddress = typeof process !== 'undefined' ? process.env.CONTRACT_ADDRESS : undefined;
+  const signerKey = typeof process !== 'undefined' ? process.env.SIGNER_PRIVATE_KEY : undefined;
 
+  if (ethers && providerUrl && contractAddress && signerKey) {
+    try {
+      const provider = new ethers.providers.JsonRpcProvider(providerUrl);
+      const wallet = new ethers.Wallet(signerKey, provider);
+      // Minimal ABI for the Voting contract methods we need.
+      const abi = [
+        'function vote(bytes32 position, bytes32[] calldata candidateIds) external',
+      ];
+      const contract = new ethers.Contract(contractAddress, abi, wallet);
+
+      // Convert string position and candidate ids to bytes32
+      const toBytes32 = (s: string) => ethers.utils.formatBytes32String(s);
+      const pos = toBytes32(payload.position);
+      const cids = payload.candidateIds.map((c) => toBytes32(c));
+
+      const tx = await contract.vote(pos, cids, { gasLimit: 500000 });
+      const receipt = await tx.wait();
+      return receipt.transactionHash;
+    } catch (err) {
+      // If contract call fails, fall back to simulated hash but surface the error in logs.
+      // In production, propagate or handle appropriately.
+      // eslint-disable-next-line no-console
+      console.error('Contract call failed:', err);
+    }
+  }
+
+  // Fallback: simulate network delay and return a fake tx hash
+  await new Promise((r) => setTimeout(r, 300));
+  const txHash = `0x${Math.floor(Math.random() * 1e16).toString(16).padStart(16, '0')}`;
   return txHash;
 }
 
-export const POLKADOT_INTEGRATION_NOTES = `To enable real Polkadot submissions:
-1) npm install @polkadot/api
-2) Provide a node endpoint (WsProvider) and an account seed for signing transactions.
-3) Implement submitVoteOnChain to build and send an extrinsic that stores a blinded
-   or hashed vote on-chain (do not store raw votes or personal data on-chain).
-4) Securely manage keys (HSM or remote signer).`;
+export const POLKADOT_INTEGRATION_NOTES = `Notes:
+1) To interact with Substrate-based chains use @polkadot/api and build an extrinsic.
+2) To interact with EVM-compatible parachains deploy contracts/Voting.sol and set CONTRACT_PROVIDER_URL, CONTRACT_ADDRESS, and SIGNER_PRIVATE_KEY.
+3) This file currently attempts an ethers.js call if configuration is present, otherwise returns a simulated tx hash.`;
