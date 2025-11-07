@@ -10,6 +10,7 @@ export default function VotePage() {
   const [senatorChoices, setSenatorChoices] = useState<string[]>([]);
   const [message, setMessage] = useState<string | null>(null);
   const [sessionActive, setSessionActive] = useState<boolean | null>(null);
+  const [showConfirm, setShowConfirm] = useState(false);
   const router = useRouter();
 
   useEffect(()=>{
@@ -111,14 +112,46 @@ export default function VotePage() {
         </section>
 
         <div className="mt-6">
-          <button className="bg-blue-600 text-white px-4 py-2 rounded" onClick={async () => {
-            // confirmation dialog before final submit
-            if (sessionActive === false) return;
-            const ok = typeof window !== 'undefined' ? window.confirm('Are you sure you want to submit your ballot? This action cannot be changed.') : true;
-            if (!ok) return;
-            await submitBallot();
-          }} disabled={sessionActive===false}>Submit Vote</button>
+          <button className="bg-blue-600 text-white px-4 py-2 rounded" onClick={() => { if (sessionActive === false) return; setShowConfirm(true); }} disabled={sessionActive===false}>Submit Vote</button>
         </div>
+
+        {/* Confirmation modal */}
+        {showConfirm && (
+          <div className="modal-overlay">
+            <div className="modal card">
+              <h3 className="modal-title">Confirm your ballot</h3>
+              <div className="modal-body">
+                <p>Please review your selections. Submitting will finalize your ballot for this session.</p>
+                <div className="mt-3">
+                  <strong>President:</strong> {(() => {
+                    const p = candidates.find(c => c.id === presidentChoice);
+                    return p ? p.name : <em>None selected</em>;
+                  })()}
+                </div>
+                <div className="mt-2">
+                  <strong>Vice President:</strong> {(() => {
+                    const v = candidates.find(c => c.id === vpChoice);
+                    return v ? v.name : <em>None selected</em>;
+                  })()}
+                </div>
+                <div className="mt-2">
+                  <strong>Senators:</strong>
+                  <ul className="mt-1 ml-4 list-disc">
+                    {senatorChoices.length === 0 && <li><em>None selected</em></li>}
+                    {senatorChoices.map(id => {
+                      const s = candidates.find(c => c.id === id);
+                      return <li key={id}>{s ? s.name : id}</li>;
+                    })}
+                  </ul>
+                </div>
+              </div>
+              <div className="modal-actions mt-4 flex gap-2">
+                <button className="btn" onClick={async () => { setShowConfirm(false); await submitBallot(); }}>Confirm</button>
+                <button className="bg-gray-600 text-white px-3 py-1 rounded" onClick={() => setShowConfirm(false)}>Cancel</button>
+              </div>
+            </div>
+          </div>
+        )}
 
         {message && <div className="mt-4">{message}</div>}
       </div>
