@@ -83,10 +83,7 @@ export default function VotePage() {
               <div className="font-medium">{c.name}</div>
             </label>
           ))}
-          <div className="mt-2">
-            {/* single-ballot flow keeps per-position action but primary flow is Submit Vote below */}
-            <button className="btn" onClick={()=>submitPosition('President', presidentChoice ? [presidentChoice] : [])} disabled={sessionActive===false}>Vote President</button>
-          </div>
+          <div className="mt-2" />
         </section>
 
         <section className="card mb-4">
@@ -97,9 +94,7 @@ export default function VotePage() {
               <div className="font-medium">{c.name}</div>
             </label>
           ))}
-          <div className="mt-2">
-            <button className="btn" onClick={()=>submitPosition('Vice President', vpChoice ? [vpChoice] : [])} disabled={sessionActive===false}>Vote Vice President</button>
-          </div>
+          <div className="mt-2" />
         </section>
 
         <section className="card mb-4">
@@ -112,13 +107,17 @@ export default function VotePage() {
               </label>
             ))}
           </div>
-          <div className="mt-2">
-            <button className="btn" onClick={()=>submitPosition('Senator', senatorChoices)} disabled={sessionActive===false}>Vote Senators</button>
-          </div>
+          <div className="mt-2" />
         </section>
 
         <div className="mt-6">
-          <button className="bg-blue-600 text-white px-4 py-2 rounded" onClick={submitBallot} disabled={sessionActive===false}>Submit Vote</button>
+          <button className="bg-blue-600 text-white px-4 py-2 rounded" onClick={async () => {
+            // confirmation dialog before final submit
+            if (sessionActive === false) return;
+            const ok = typeof window !== 'undefined' ? window.confirm('Are you sure you want to submit your ballot? This action cannot be changed.') : true;
+            if (!ok) return;
+            await submitBallot();
+          }} disabled={sessionActive===false}>Submit Vote</button>
         </div>
 
         {message && <div className="mt-4">{message}</div>}
