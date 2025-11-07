@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { getSession, findUserById, hasVoted, recordVote, isVotingActive } from "../../../../lib/data";
+import { getSession, findUserById, hasVoted, hasVotedAny, recordVote, isVotingActive } from "../../../../lib/data";
 import { submitVoteOnChain } from "../../../../lib/polkadot";
 
 function parseCookies(cookieHeader?: string | null) {
@@ -28,6 +28,12 @@ export async function POST(req: Request) {
 
     if (!isVotingActive()) {
       return NextResponse.json({ ok: false, error: "voting session is not active" }, { status: 403 });
+    }
+
+    // If the voter already submitted any vote this session, do not allow
+    // submitting a new ballot. This enforces one-ballot-per-voter.
+    if (hasVotedAny(userId)) {
+      return NextResponse.json({ ok: false, error: 'voter has already submitted a ballot for this session' }, { status: 400 });
     }
 
     for (const item of votesPayload) {

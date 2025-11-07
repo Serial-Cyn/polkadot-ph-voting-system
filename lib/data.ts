@@ -97,6 +97,7 @@ export function createSession(userId: string, ttlMs = 1000 * 60 * 60 * 8) {
 
 export function getSession(token?: string) {
   if (!token) return null;
+  // If the token matches an in-memory session, return it.
   const s = sessions[token];
   if (s) {
     if (s.expires < Date.now()) {
@@ -106,10 +107,18 @@ export function getSession(token?: string) {
     return s.userId;
   }
 
-  // Fallback: allow stateless session where the cookie value is the userId directly.
-  // This makes the prototype work in environments where middleware (Edge) and
-  // API routes (Node) cannot share in-memory state. In production use a
-  // persistent session store or signed tokens.
+  // Try verifying a signed session token (stateless)
+  try {
+    // lazy require to avoid adding crypto to edge runtimes
+    // eslint-disable-next-line @typescript-eslint/no-var-requires
+    const { verifySession } = require('./session');
+    const payload = verifySession(token);
+    if (payload && payload.userId) return payload.userId;
+  } catch (e) {
+    // ignore
+  }
+
+  // Fallback: treat cookie value as userId directly (prototype only)
   if (typeof token === 'string') {
     const u = findUserById(token);
     if (u) return u.id;
@@ -145,6 +154,11 @@ export function recordVote(r: VoteRecord) {
 
 export function hasVoted(voterId: string, position: string) {
   return votes.some((v) => v.voterId === voterId && v.position === position);
+}
+
+// Has the voter submitted any vote in this session (any position)?
+export function hasVotedAny(voterId: string) {
+  return votes.some((v) => v.voterId === voterId);
 }
 
 export function listCandidatesByPosition(position: string) {

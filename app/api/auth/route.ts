@@ -1,35 +1,72 @@
 import { NextResponse } from "next/server";
-import { validateOtp, createSession, findUserById, users } from "../../../lib/data";
+import { validateOtp, createSession, findUserById, users, sessions } from "../../../lib/data";
 // derive admin address from private key (optional)
-let ADMIN_ADDRESS: string | null = null;
-// Allow either a direct admin address or a private key in env.
-if (process.env.ADMIN_ADDRESS && typeof process.env.ADMIN_ADDRESS === 'string' && process.env.ADMIN_ADDRESS.trim().length > 0) {
-  ADMIN_ADDRESS = process.env.ADMIN_ADDRESS.trim().toLowerCase();
-  } else {
+// Resolve admin address at runtime (reads env each request so a restart isn't required)
+function getAdminAddress(): string | null {
+  const envAddr = process.env.ADMIN_ADDRESS;
+  if (envAddr && typeof envAddr === 'string' && envAddr.trim().length > 0) return envAddr.trim().toLowerCase();
+
+  // If not present in process.env, try to read .env or .env.local so changes
+  // on disk are picked up without restarting the dev server.
   try {
-    // lazily require ethers so this file doesn't fail if ethers isn't installed in some dev setups
-    // eslint-disable-next-line @typescript-eslint/no-var-requires
-    const { Wallet } = require('ethers');
-    const pk = process.env.ADMIN_PRIVATE_KEY || process.env.SIGNER_PRIVATE_KEY || '';
-    if (pk && typeof pk === 'string' && pk.trim().length > 0) {
-      const trimmed = pk.trim();
-      // If the ADMIN_PRIVATE_KEY env contains an address (0x... length 42), accept it as ADMIN_ADDRESS.
-      if (/^0x[0-9a-fA-F]{40}$/.test(trimmed)) {
-        ADMIN_ADDRESS = trimmed.toLowerCase();
-      } else {
+    // eslint-disable-next-line node/no-sync
+    const fs = require('fs');
+    const path = require('path');
+    const root = process.cwd();
+    const candidates = ['.env.local', '.env'];
+    for (const fname of candidates) {
+      const p = path.join(root, fname);
+      if (fs.existsSync(p)) {
+        const raw = fs.readFileSync(p, 'utf8');
+        for (const line of raw.split(/\r?\n/)) {
+          const m = line.match(/^\s*ADMIN_ADDRESS\s*=\s*(.+)\s*$/i);
+          if (m) return m[1].trim().toLowerCase();
+          const m2 = line.match(/^\s*ADMIN_PRIVATE_KEY\s*=\s*(.+)\s*$/i);
+          if (m2) {
+            const val = m2[1].trim();
+            if (/^0x[0-9a-fA-F]{40}$/.test(val)) return val.toLowerCase();
+            // otherwise fall through to try derive below
+            // set pk variable
+            // eslint-disable-next-line no-var
+            var __pk_from_env_file = val; // intentionally var-scoped
+          }
+        }
+      }
+    }
+    if (typeof __pk_from_env_file !== 'undefined') {
+      // proceed with __pk_from_env_file
+      const pk = __pk_from_env_file;
+      if (pk && typeof pk === 'string' && pk.trim().length > 0) {
+        const trimmed = pk.trim();
+        if (/^0x[0-9a-fA-F]{40}$/.test(trimmed)) return trimmed.toLowerCase();
         try {
+          // eslint-disable-next-line @typescript-eslint/no-var-requires
+          const { Wallet } = require('ethers');
           const w = new Wallet(trimmed);
-          ADMIN_ADDRESS = w.address.toLowerCase();
+          return w.address.toLowerCase();
         } catch (e) {
-          // invalid private key; ignore
-          ADMIN_ADDRESS = null;
+          return null;
         }
       }
     }
   } catch (e) {
-    // ethers not available; ADMIN_ADDRESS remains null
-    ADMIN_ADDRESS = null;
+    // ignore read errors
   }
+
+  const pk = process.env.ADMIN_PRIVATE_KEY || process.env.SIGNER_PRIVATE_KEY || '';
+  if (pk && typeof pk === 'string' && pk.trim().length > 0) {
+    const trimmed = pk.trim();
+    if (/^0x[0-9a-fA-F]{40}$/.test(trimmed)) return trimmed.toLowerCase();
+    try {
+      // eslint-disable-next-line @typescript-eslint/no-var-requires
+      const { Wallet } = require('ethers');
+      const w = new Wallet(trimmed);
+      return w.address.toLowerCase();
+    } catch (e) {
+      return null;
+    }
+  }
+  return null;
 }
 
 export async function POST(req: Request) {
@@ -38,7 +75,8 @@ export async function POST(req: Request) {
 
     // Wallet-based login: client sends walletAddress
     if (body && body.walletAddress) {
-      const walletAddress = String(body.walletAddress).trim();
+      // normalize address to lowercase for consistent lookup/storage
+      const walletAddress = String(body.walletAddress).trim().toLowerCase();
       // Log incoming wallet auth attempts (provider only, no addresses/keys)
       try {
         console.log(`[api/auth] wallet login attempt received; provider=${String(body.provider || '')}`);
@@ -49,7 +87,8 @@ export async function POST(req: Request) {
 
         // find or create a voter account for this walletAddress
         let user = findUserById(walletAddress);
-        const isAdmin = ADMIN_ADDRESS && walletAddress.toLowerCase() === ADMIN_ADDRESS;
+  const ADMIN_ADDRESS = getAdminAddress();
+  const isAdmin = ADMIN_ADDRESS && walletAddress.toLowerCase() === ADMIN_ADDRESS;
         if (!user) {
           // create a simple user record (in-memory) for this prototype
           const newUser = { id: walletAddress, name: isAdmin ? 'Admin' : `Wallet ${walletAddress.slice(0,6)}`, role: isAdmin ? 'admin' : 'voter', otp: '' } as any;
@@ -60,7 +99,20 @@ export async function POST(req: Request) {
           if (isAdmin) user.role = 'admin';
         }
 
-        const token = createSession(user!.id);
+        // create a signed session token so session is valid across requests/processes
+        // lazy-require signSession
+        let sessionToken: string | null = null;
+        try {
+          // eslint-disable-next-line @typescript-eslint/no-var-requires
+          const { signSession } = require('../../../lib/session');
+          sessionToken = signSession({ userId: user!.id, role: user!.role, name: user!.name });
+        } catch (e) {
+          // fallback to in-memory session token
+          const t = createSession(user!.id);
+          sessionToken = t;
+          sessions[sessionToken] = { userId: user!.id, expires: Date.now() + 1000 * 60 * 60 * 8 };
+        }
+
         const resBody: any = { ok: true, user: { id: user!.id, name: user!.name, role: user!.role } };
         try {
           console.log(`[api/auth] created session; role=${user!.role}`);
@@ -68,11 +120,12 @@ export async function POST(req: Request) {
           // ignore
         }
       if (process.env.NODE_ENV !== 'production') {
-        resBody.debugToken = token;
+        resBody.debugToken = sessionToken;
         resBody.debugCookieValue = user!.id;
       }
-      const res = NextResponse.json(resBody);
-      res.cookies.set({ name: 'session', value: user!.id, httpOnly: true, path: '/', sameSite: 'strict' });
+  const res = NextResponse.json(resBody);
+  // set signed session token
+  res.cookies.set({ name: 'session', value: sessionToken || user!.id, httpOnly: true, path: '/', sameSite: 'lax' });
       return res;
     }
 
@@ -89,15 +142,24 @@ export async function POST(req: Request) {
     if (!ok) return NextResponse.json({ ok: false, error: "invalid otp" }, { status: 401 });
 
     const token = createSession(id);
+    // try to sign a stateless token as well
+    let sessionToken: string | null = null;
+    try {
+      // eslint-disable-next-line @typescript-eslint/no-var-requires
+      const { signSession } = require('../../../lib/session');
+      sessionToken = signSession({ userId: user.id, role: user.role, name: user.name });
+    } catch (e) {
+      sessionToken = token;
+    }
 
     const resBody: any = { ok: true, user: { id: user.id, name: user.name, role: user.role } };
     if (process.env.NODE_ENV !== 'production') {
-      resBody.debugToken = token;
+      resBody.debugToken = sessionToken;
       resBody.debugCookieValue = user.id; // help debugging what cookie value we set
     }
 
     const res = NextResponse.json(resBody);
-    res.cookies.set({ name: 'session', value: user.id, httpOnly: true, path: '/', sameSite: 'strict' });
+    res.cookies.set({ name: 'session', value: sessionToken || user.id, httpOnly: true, path: '/', sameSite: 'lax' });
     return res;
   } catch (err) {
     return NextResponse.json({ ok: false, error: String(err) }, { status: 500 });

@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { getSession, findUserById, hasVoted, recordVote, isVotingActive } from "../../../lib/data";
+import { getSession, findUserById, hasVoted, hasVotedAny, recordVote, isVotingActive } from "../../../lib/data";
 import { submitVoteOnChain } from "../../../lib/polkadot";
 
 function parseCookies(cookieHeader?: string | null) {
@@ -37,7 +37,14 @@ export async function POST(req: Request) {
       return NextResponse.json({ ok: false, error: "can select up to 12 senators" }, { status: 400 });
     }
 
+    // Enforce one-ballot-per-voter-per-session: if user already submitted
+    // any vote, block further voting for the session.
+    if (hasVotedAny(userId)) {
+      return NextResponse.json({ ok: false, error: "voter has already submitted a ballot for this session" }, { status: 400 });
+    }
+
     if (hasVoted(userId, position)) {
+      // older per-position check (shouldn't be hit if hasVotedAny is used)
       return NextResponse.json({ ok: false, error: "already voted for this position" }, { status: 400 });
     }
 

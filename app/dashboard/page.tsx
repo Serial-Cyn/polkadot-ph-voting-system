@@ -14,13 +14,12 @@ export default function DashboardPage() {
   const [votedPositions, setVotedPositions] = useState<Record<string, boolean>>({});
   const [sessionActive, setSessionActive] = useState<boolean | null>(null);
   const router = useRouter();
+  const [authFailed, setAuthFailed] = useState<boolean>(false);
 
   useEffect(()=>{
-    fetch('/api/me', { credentials: 'include' })
-      .then(r=>r.json())
-      .then(d=>{ if (d.ok) setUser(d.user); else router.push('/login'); })
-      .catch(()=>router.push('/login'));
-
+    let cancelled = false;
+    // Always fetch public candidates and tally so the dashboard shows content
+    // even if auth is delayed or fails.
     fetch('/api/candidates')
       .then(r=>r.json())
       .then(d=>{ if (d.ok && Array.isArray(d.candidates)) setCandidates(d.candidates); else if (Array.isArray(d)) setCandidates(d); else setCandidates([]); })
@@ -30,7 +29,32 @@ export default function DashboardPage() {
       .then(r=>r.json())
       .then(d=>{ if (d.ok) setTally(d.tally || {}); })
       .catch(()=>{});
-    fetch('/api/session').then(r=>r.json()).then(d=>{ if (d.ok) setSessionActive(d.active); }).catch(()=>{});
+
+    async function checkMe(retries = 6) {
+      for (let i = 0; i < retries; i++) {
+        try {
+          const r = await fetch('/api/me', { credentials: 'include' });
+          const d = await r.json().catch(() => ({ ok: false }));
+          if (d && d.ok) {
+            if (!cancelled) setUser(d.user);
+            // after successful auth, fetch session state
+            try {
+              const sRes = await fetch('/api/session');
+              const sJson = await sRes.json().catch(() => ({}));
+              if (sJson && sJson.ok) setSessionActive(sJson.active);
+            } catch (e) {}
+            return;
+          }
+        } catch (err) {
+          // ignore and retry
+        }
+        // small backoff before retrying
+        await new Promise((res) => setTimeout(res, 300));
+      }
+      if (!cancelled) setAuthFailed(true);
+    }
+    checkMe().catch(()=>router.push('/login'));
+    return () => { cancelled = true; };
   }, []);
 
   // Dashboard now shows tally and session status; voting happens on /vote
@@ -38,8 +62,33 @@ export default function DashboardPage() {
 
   async function doLogout() {
     await fetch('/api/auth/logout', { method: 'POST', credentials: 'include' });
+    // clear client-side user state and navigate to login
+    setUser(null);
     window.location.href = '/login';
   }
+
+  // If server-side auth hasn't resolved but the user has a connected wallet
+  // in the browser (MetaMask), show a temporary client-side user so UI
+  // (Vote / Logout) remains available. This improves UX during auth races.
+  useEffect(() => {
+    if (user) return; // server already set user
+    // @ts-ignore
+    const eth = typeof window !== 'undefined' ? (window as any).ethereum : null;
+    if (!eth || typeof eth.request !== 'function') return;
+    let cancelled = false;
+    (async () => {
+      try {
+        const accounts: string[] = await eth.request({ method: 'eth_accounts' });
+        if (!cancelled && Array.isArray(accounts) && accounts.length > 0) {
+          const addr = String(accounts[0]).toLowerCase();
+          setUser({ id: addr, name: `Wallet ${addr.slice(0,6)}`, role: 'voter (unverified)' });
+        }
+      } catch (e) {
+        // ignore
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [user]);
 
   return (
     <div className="p-8">
@@ -56,7 +105,11 @@ export default function DashboardPage() {
             </div>
           </div>
         )}
-
+        {!user && authFailed && (
+          <div className="mb-4 text-red-600">
+            Authentication failed or timed out. Please <a href="/login" className="underline">return to login</a> and try again.
+          </div>
+        )}
         {user && user.role === 'admin' && (
           <div className="mb-4">
             <button onClick={() => router.push('/admin')} className="bg-green-600 text-white px-3 py-1 rounded">Admin panel</button>

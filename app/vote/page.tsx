@@ -22,6 +22,7 @@ export default function VotePage() {
   }
 
   async function submitPosition(position: string, candidateIds: string[]) {
+    // kept for backward compatibility but not used when submitting full ballot
     setMessage(null);
     try {
       const res = await fetch('/api/vote', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ position, candidateIds }), credentials: 'include' });
@@ -30,6 +31,37 @@ export default function VotePage() {
       setMessage(`${position}: Vote recorded (tx ${d.txHash || 'n/a'})`);
       // optionally navigate back
       setTimeout(()=>router.push('/dashboard'), 1200);
+    } catch (err:any) { setMessage(String(err)); }
+  }
+
+  // Submit the complete ballot at once. Uses the batch endpoint which enforces
+  // one-ballot-per-voter-per-session on the server.
+  async function submitBallot() {
+    setMessage(null);
+    // client-side validation mirroring server rules
+    const votes: Array<{ position: string; candidateIds: string[] }> = [];
+    votes.push({ position: 'President', candidateIds: presidentChoice ? [presidentChoice] : [] });
+    votes.push({ position: 'Vice President', candidateIds: vpChoice ? [vpChoice] : [] });
+    votes.push({ position: 'Senator', candidateIds: senatorChoices });
+
+    // basic validation
+    if (votes[0].candidateIds.length !== 1) { setMessage('Please select exactly one President.'); return; }
+    if (votes[1].candidateIds.length !== 1) { setMessage('Please select exactly one Vice President.'); return; }
+    if (votes[2].candidateIds.length > 12) { setMessage('You can select up to 12 Senators.'); return; }
+    if (sessionActive === false) { setMessage('Voting session is not active.'); return; }
+
+    try {
+      const res = await fetch('/api/vote/batch', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ votes }), credentials: 'include' });
+      const d = await res.json();
+      if (!d.ok) { setMessage(d.error || 'Ballot submit failed'); return; }
+      // show results per position
+      const okAll = Array.isArray(d.results) && d.results.every((r: any) => r.ok === true);
+      if (okAll) {
+        setMessage('Ballot submitted successfully. Thank you for voting.');
+        setTimeout(()=>router.push('/dashboard'), 1400);
+      } else {
+        setMessage('Partial result: ' + JSON.stringify(d.results));
+      }
     } catch (err:any) { setMessage(String(err)); }
   }
 
@@ -52,6 +84,7 @@ export default function VotePage() {
             </label>
           ))}
           <div className="mt-2">
+            {/* single-ballot flow keeps per-position action but primary flow is Submit Vote below */}
             <button className="btn" onClick={()=>submitPosition('President', presidentChoice ? [presidentChoice] : [])} disabled={sessionActive===false}>Vote President</button>
           </div>
         </section>
@@ -83,6 +116,10 @@ export default function VotePage() {
             <button className="btn" onClick={()=>submitPosition('Senator', senatorChoices)} disabled={sessionActive===false}>Vote Senators</button>
           </div>
         </section>
+
+        <div className="mt-6">
+          <button className="bg-blue-600 text-white px-4 py-2 rounded" onClick={submitBallot} disabled={sessionActive===false}>Submit Vote</button>
+        </div>
 
         {message && <div className="mt-4">{message}</div>}
       </div>
